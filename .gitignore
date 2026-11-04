@@ -1,0 +1,43 @@
+# Maven
+target/
+*.class
+*.jar
+*.war
+!.gitkeep
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+.cproject
+.cache/
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+data/received/
+data/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temporary
+*.swp
+*.swo
+*~
+.tmp/
+
+# Build
+build/
+out/
+
+# Eclipse
+.metadata/

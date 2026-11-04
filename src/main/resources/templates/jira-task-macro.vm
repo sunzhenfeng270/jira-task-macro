@@ -1,0 +1,10 @@
+#requireResource("com.tangzhi.confluence.jira-task-macro:jira-task-resources")
+<div class="jira-task-macro"
+     data-page-id="$pageId"
+     data-page-title="$pageTitle"
+     data-default-project="$projectKey"
+     data-default-issue-type="$issueTypeName"
+     data-summary-prefix="$summaryPrefix"
+     data-labels="$labels">
+    <div class="jt-loading">正在加载 Jira 任务表单…</div>
+</div>

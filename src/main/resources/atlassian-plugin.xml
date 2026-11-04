@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<atlassian-plugin key="${atlassian.plugin.key}" name="${project.name}" plugins-version="2">
+    <plugin-info>
+        <description>${project.description}</description>
+        <version>${project.version}</version>
+        <vendor name="${project.organization.name}" url="${project.organization.url}"/>
+    </plugin-info>
+
+    <!-- 宏：新建 Jira 任务（宏内表单，前端 JS 调 REST） -->
+    <macro name="jira-task-creator" key="jira-task-macro"
+           class="com.tangzhi.confluence.jiratask.JiraTaskMacro">
+        <description>在页面中创建 Jira 任务，并汇总本页已创建的任务</description>
+        <param name="projectKey" description="默认 Jira 项目 Key，例如 ABC">默认项目 Key</param>
+        <param name="issueTypeName" description="默认任务类型名称，例如 任务">默认任务类型</param>
+        <param name="summaryPrefix" description="标题前缀，例如【会议行动项】">标题前缀</param>
+        <param name="labels" description="附加标签，英文逗号分隔，例如 meeting-action">附加标签</param>
+    </macro>
+
+    <!-- 宏：Jira 任务表格（服务端渲染，Comala Word 导出可用） -->
+    <macro name="jira-issue-table" key="jira-issue-table-macro"
+           class="com.tangzhi.confluence.jiratask.JiraIssueTableMacro">
+        <description>在页面中展示 Jira 任务表格，支持 JQL 过滤与列选择</description>
+        <param name="title" description="表格标题，留空显示「Jira 任务」">标题</param>
+        <param name="jql" description="完整 JQL，填写后忽略下面的简化过滤参数">JQL</param>
+        <param name="projectKey" description="项目 Key，例如 ABC">项目 Key</param>
+        <param name="statuses" description="状态，英文逗号分隔，例如 待办,进行中">状态</param>
+        <param name="assignee" description="经办人用户名；@me 表示当前登录用户">经办人</param>
+        <param name="labels" description="标签，英文逗号分隔">标签</param>
+        <param name="columns" description="列，英文逗号分隔；留空使用默认列">列</param>
+        <param name="maxResults" description="最多显示条数，默认 50，上限 200">最大条数</param>
+    </macro>
+
+    <rest key="jira-task-rest" path="/jira-task" version="1.0">
+        <description>Jira 任务创建与查询接口</description>
+    </rest>
+
+    <web-resource key="jira-task-resources" name="Jira Task Macro Resources">
+        <dependency>com.atlassian.auiplugin:ajs</dependency>
+        <resource type="download" name="jira-task.js" location="js/jira-task.js"/>
+        <resource type="download" name="jira-task.css" location="css/jira-task.css"/>
+        <context>atl.general</context>
+    </web-resource>
+</atlassian-plugin>
