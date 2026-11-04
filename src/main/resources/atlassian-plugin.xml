@@ -26,7 +26,7 @@
         <param name="statuses" description="状态，英文逗号分隔，例如 待办,进行中">状态</param>
         <param name="assignee" description="经办人用户名；@me 表示当前登录用户">经办人</param>
         <param name="labels" description="标签，英文逗号分隔">标签</param>
-        <param name="columns" description="列，英文逗号分隔；留空使用默认列">列</param>
+        <param name="columns" description="列，英文逗号分隔；支持内置列、customfield_&lt;id&gt; 或 Jira 字段名（如 enddate）">列</param>
         <param name="maxResults" description="最多显示条数，默认 50，上限 200">最大条数</param>
     </macro>
 
@@ -34,10 +34,11 @@
         <description>Jira 任务创建与查询接口</description>
     </rest>
 
+    <resource type="i18n" name="i18n" location="i18n/jira-task"/>
+
     <web-resource key="jira-task-resources" name="Jira Task Macro Resources">
         <dependency>com.atlassian.auiplugin:ajs</dependency>
         <resource type="download" name="jira-task.js" location="js/jira-task.js"/>
         <resource type="download" name="jira-task.css" location="css/jira-task.css"/>
-        <context>atl.general</context>
     </web-resource>
 </atlassian-plugin>

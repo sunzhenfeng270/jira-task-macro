@@ -1,6 +1,6 @@
 #if($showTitle)
 <div style="font-family:Arial,Helvetica,sans-serif;color:#172b4d;font-size:14px;font-weight:bold;margin:0 0 6px 0;">
-    $title#if($total > 0)（共 $total 条，显示 $shown 条）#end
+    $title
 </div>
 #end
 
@@ -12,7 +12,7 @@
 <table style="border-collapse:collapse;width:100%;font-size:13px;font-family:Arial,Helvetica,sans-serif;">
     <tbody>
     <tr>
-        <td style="border:1px solid #cccccc;padding:8px;color:#6b778c;">没有符合条件的 Jira 任务</td>
+        <td style="border:1px solid #cccccc;padding:8px;color:#6b778c;">$emptyText</td>
     </tr>
     </tbody>
 </table>
@@ -37,4 +37,18 @@
     #end
     </tbody>
 </table>
+#end
+
+## caption 与 warning 放在表格之后：Scroll Table Layout 宏必须紧邻表格插入，
+## 否则导出的列宽/固定布局设置可能失效。
+#if($caption != "")
+<div style="font-family:Arial,Helvetica,sans-serif;color:#6b778c;font-size:12px;margin:6px 0 0 0;">
+    $caption
+</div>
+#end
+
+#if($warning != "")
+<div style="font-family:Arial,Helvetica,sans-serif;border:1px solid #ffe380;background:#fffae6;color:#7a6a00;padding:6px 10px;margin:6px 0 0 0;font-size:12px;">
+    $warning
+</div>
 #end

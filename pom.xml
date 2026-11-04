@@ -4,16 +4,16 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.tangzhi.confluence</groupId>
+    <groupId>com.tangzhi</groupId>
     <artifactId>jira-task-macro</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.01.261104</version>
     <packaging>atlassian-plugin</packaging>
     <name>Jira Task Macro</name>
     <description>在 Confluence 页面中创建 Jira 任务并展示任务表格</description>
 
     <organization>
-        <name>Example</name>
-        <url>https://example.com</url>
+        <name>Tangzhi</name>
+        <url>https://github.com/szf2q/jira-task-macro</url>
     </organization>
 
     <properties>
@@ -22,7 +22,8 @@
         <!-- 仅影响构建/本地调试；若 SDK 生成的是其他版本，请替换为生成的版本 -->
         <amps.version>8.2.0</amps.version>
         <atlassian.spring.scanner.version>2.2.0</atlassian.spring.scanner.version>
-        <atlassian.plugin.key>${project.groupId}.${project.artifactId}</atlassian.plugin.key>
+        <atlassian.spring.scanner.plugin.version>5.1.0</atlassian.spring.scanner.plugin.version>
+        <atlassian.plugin.key>com.tangzhi.confluence.${project.artifactId}</atlassian.plugin.key>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -57,6 +58,18 @@
             <snapshots><enabled>false</enabled></snapshots>
         </pluginRepository>
     </pluginRepositories>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Confluence 8.9.4 依赖 javax.transaction:jta:1.0.1B，
+                 该版本仅存在于已下线的 java.sun.com 仓库，改用中央仓库可用的 1.1 -->
+            <dependency>
+                <groupId>javax.transaction</groupId>
+                <artifactId>jta</artifactId>
+                <version>1.1</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -117,6 +130,7 @@
                     <productDataVersion>${confluence.data.version}</productDataVersion>
                     <instructions>
                         <Atlassian-Plugin-Key>${atlassian.plugin.key}</Atlassian-Plugin-Key>
+                        <Bundle-SymbolicName>${atlassian.plugin.key}</Bundle-SymbolicName>
                         <Export-Package></Export-Package>
                         <Import-Package>
                             org.springframework.osgi.*;resolution:="optional",
@@ -126,6 +140,19 @@
                         <Spring-Context>*;timeout=60</Spring-Context>
                     </instructions>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.atlassian.plugin</groupId>
+                <artifactId>atlassian-spring-scanner-maven-plugin</artifactId>
+                <version>${atlassian.spring.scanner.plugin.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>atlassian-spring-scanner</goal>
+                        </goals>
+                        <phase>process-classes</phase>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

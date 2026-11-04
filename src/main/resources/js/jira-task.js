@@ -1,246 +1,427 @@
-(function ($) {
+(function () {
     'use strict';
 
-    function api(path, options) {
-        return $.ajax($.extend({
-            url: AJS.contextPath() + '/rest/jira-task/1.0' + path,
-            dataType: 'json',
-            headers: { 'X-Atlassian-Token': 'no-check' }
-        }, options));
-    }
+    var REST_BASE = '/rest/jira-task/1.0';
+
+    // 同一页面上的多个宏共享项目/优先级列表，避免重复请求
+    var shared = { projects: null, priorities: null };
 
     function esc(value) {
-        return $('<div/>').text(value == null ? '' : String(value)).html();
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function text($macro, key, fallback) {
+        var value = $macro.attr('data-i18n-' + key);
+        return value == null || value === '' ? fallback : value;
+    }
+
+    function api($macro, path, options) {
+        options = options || {};
+        var settings = {
+            url: AJS.contextPath() + REST_BASE + path,
+            type: options.type || 'GET',
+            data: options.data,
+            dataType: 'json',
+            cache: false,
+            headers: { 'X-Atlassian-Token': 'no-check' }
+        };
+        if (settings.type === 'POST') {
+            settings.contentType = 'application/json';
+        }
+        return $.ajax(settings);
+    }
+
+    /**
+     * 共享请求：成功后缓存结果供其他宏复用，失败时清空缓存以便下次重试。
+     */
+    function sharedRequest(name, $macro, path) {
+        if (!shared[name]) {
+            shared[name] = api($macro, path);
+            shared[name].fail(function () {
+                shared[name] = null;
+            });
+        }
+        return shared[name];
     }
 
     function errorText(xhr, fallback) {
-        var body = xhr && xhr.responseJSON;
-        return (body && body.error) || fallback;
+        if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
+            return xhr.responseJSON.error;
+        }
+        if (xhr && xhr.responseText) {
+            try {
+                var parsed = JSON.parse(xhr.responseText);
+                if (parsed && parsed.error) {
+                    return parsed.error;
+                }
+            } catch (ignored) {
+                // 忽略非 JSON 响应
+            }
+        }
+        return fallback;
     }
 
-    function loadRelated($macro, pageId) {
+    function option(value, label) {
+        return '<option value="' + esc(value) + '">' + esc(label) + '</option>';
+    }
+
+    function relatedItem(issue, t) {
+        var html = '<li>'
+            + '<a href="' + esc(issue.url || '#') + '" target="_blank" rel="noopener noreferrer">'
+            + esc(issue.key || '') + '</a>'
+            + '<span class="jt-related-summary">' + esc(issue.summary || '') + '</span>';
+        if (issue.status) {
+            html += '<span class="jt-tag">' + esc(issue.status) + '</span>';
+        }
+        if (issue.assignee) {
+            html += '<span class="jt-muted">' + esc(issue.assignee) + '</span>';
+        }
+        if (issue.dueDate) {
+            html += '<span class="jt-muted">'
+                + esc(t('due', 'Due {0}').replace('{0}', issue.dueDate))
+                + '</span>';
+        }
+        return html + '</li>';
+    }
+
+    /**
+     * @param created 刚创建的任务，Jira 搜索索引可能还没收录，先直接补到列表里
+     */
+    function loadRelated($macro, t, created) {
+        var pageId = $macro.attr('data-page-id');
         if (!pageId) {
             return;
         }
-        api('/issues', { data: { pageId: pageId } }).done(function (issues) {
+        api($macro, '/issues', { data: { pageId: pageId } }).done(function (data) {
+            var issues = (data && data.issues) || [];
+            var total = data && data.total != null ? data.total : issues.length;
             var $related = $macro.find('.jt-related');
-            if (!issues || !issues.length) {
+
+            var known = {};
+            $.each(issues, function (index, issue) {
+                known[issue.key] = true;
+            });
+            var missing = created && created.key && !known[created.key] ? created : null;
+            if (!issues.length && !missing) {
                 $related.hide().empty();
                 return;
             }
-            var html = '<div class="jt-related-title">本页已创建的任务（' + issues.length + '）</div><ul>';
-            $.each(issues, function (i, issue) {
-                html += '<li>'
-                    + '<a href="' + esc(issue.url) + '" target="_blank" rel="noreferrer">' + esc(issue.key) + '</a>'
-                    + '<span class="jt-related-summary">' + esc(issue.summary) + '</span>'
-                    + (issue.status ? '<span class="jt-tag">' + esc(issue.status) + '</span>' : '')
-                    + (issue.assignee ? '<span class="jt-muted">' + esc(issue.assignee) + '</span>' : '')
-                    + (issue.dueDate ? '<span class="jt-muted">截止 ' + esc(issue.dueDate) + '</span>' : '')
-                    + '</li>';
+
+            var shown = issues.length + (missing ? 1 : 0);
+            var count = Math.max(total, shown);
+            var title = t('related-title', 'Issues created on this page ({0})').replace('{0}', count);
+            var html = '<div class="jt-related-title">' + esc(title);
+            if (count > shown) {
+                html += ' <span class="jt-muted">'
+                    + esc(t('related-truncated', 'Total {0}, showing {1}')
+                        .replace('{0}', count).replace('{1}', shown))
+                    + '</span>';
+            }
+            html += '</div><ul>';
+
+            if (missing) {
+                html += relatedItem(missing, t);
+            }
+            $.each(issues, function (index, issue) {
+                html += relatedItem(issue, t);
             });
-            $related.html(html + '</ul>').show();
+            html += '</ul>';
+            $related.html(html).show();
+        }).fail(function (xhr) {
+            $macro.find('.jt-related').html('<span class="jt-muted">'
+                + esc(errorText(xhr, t('error-related', 'Failed to load related issues')))
+                + '</span>').show();
         });
     }
 
     function init($macro) {
+        if ($macro.data('jt-initialized')) {
+            return;
+        }
+        $macro.data('jt-initialized', true);
+
+        var t = function (key, fallback) {
+            return text($macro, key, fallback);
+        };
         var pageId = $macro.attr('data-page-id') || '';
         var pageTitle = $macro.attr('data-page-title') || '';
-        var defaults = {
-            projectKey: $macro.attr('data-default-project') || '',
-            issueTypeName: $macro.attr('data-default-issue-type') || '',
-            summaryPrefix: $macro.attr('data-summary-prefix') || '',
-            labels: $macro.attr('data-labels') || ''
-        };
-        var assignee = null;
+        var summaryPrefix = $macro.attr('data-summary-prefix') || '';
+        var defaultProject = $macro.attr('data-default-project') || '';
+        var defaultIssueType = $macro.attr('data-default-issue-type') || '';
+        var labels = ($macro.attr('data-labels') || '').split(',')
+            .map(function (label) { return label.trim(); })
+            .filter(function (label) { return label !== ''; });
 
         var html = ''
-            + '<div class="jt-head"><span class="jt-badge">Jira</span><span class="jt-title">新建任务</span></div>'
+            + '<div class="jt-head"><span class="jt-badge">JIRA</span>'
+            + '<span class="jt-title">' + esc(t('head', 'New task')) + '</span></div>'
             + '<div class="jt-alert" style="display:none"></div>'
-            + '<div class="jt-form">'
-            + '  <div class="jt-grid">'
-            + '    <label>项目<select class="jt-project"><option value="">加载中…</option></select></label>'
-            + '    <label>任务类型<select class="jt-type"><option value="">加载中…</option></select></label>'
-            + '  </div>'
-            + '  <label>标题<input type="text" class="jt-summary" placeholder="例如：【会议行动项】补充登录页埋点" /></label>'
-            + '  <label>描述<textarea rows="4" class="jt-description" placeholder="背景、验收标准、会议结论…"></textarea></label>'
-            + '  <div class="jt-grid">'
-            + '    <label>截止日期<input type="date" class="jt-due" /></label>'
-            + '    <label>优先级<select class="jt-priority"><option value="">默认</option></select></label>'
-            + '  </div>'
-            + '  <div class="jt-field"><span class="jt-field-label">经办人</span><div class="jt-assignee-view"></div></div>'
-            + '  <div class="jt-actions">'
-            + '    <button type="button" class="aui-button aui-button-primary jt-create">创建任务</button>'
-            + '    <span class="jt-status"></span>'
-            + '  </div>'
+            + '<form class="jt-form">'
+            + '<div class="jt-grid">'
+            + '<label><span>' + esc(t('label-project', 'Project')) + '</span>'
+            + '<select class="jt-project"></select></label>'
+            + '<label><span>' + esc(t('label-issue-type', 'Issue type')) + '</span>'
+            + '<select class="jt-issue-type"></select></label>'
+            + '<label style="grid-column:1/-1"><span>' + esc(t('label-summary', 'Summary')) + '</span>'
+            + '<input type="text" class="jt-summary" placeholder="'
+            + esc(t('placeholder-summary', '')) + '"></label>'
+            + '<label style="grid-column:1/-1"><span>' + esc(t('label-description', 'Description')) + '</span>'
+            + '<textarea class="jt-description" rows="4" placeholder="'
+            + esc(t('placeholder-description', '')) + '"></textarea></label>'
+            + '<label><span>' + esc(t('label-due-date', 'Due date')) + '</span>'
+            + '<input type="date" class="jt-due"></label>'
+            + '<label><span>' + esc(t('label-priority', 'Priority')) + '</span>'
+            + '<select class="jt-priority"></select></label>'
+            + '<label style="grid-column:1/-1"><span>' + esc(t('label-assignee', 'Assignee')) + '</span>'
+            + '<div class="jt-row"><input type="text" class="jt-assignee" placeholder="'
+            + esc(t('placeholder-assignee', '')) + '">'
+            + '<button type="button" class="aui-button jt-search">'
+            + esc(t('search', 'Search')) + '</button></div>'
+            + '<div class="jt-users" style="display:none"></div>'
+            + '<div class="jt-picked" style="display:none"><span class="jt-picked-name"></span>'
+            + '<button type="button" class="aui-button jt-remove-user">'
+            + esc(t('remove', 'Remove')) + '</button></div></label>'
             + '</div>'
+            + '<div class="jt-actions">'
+            + '<button type="submit" class="aui-button aui-button-primary jt-submit">'
+            + esc(t('create', 'Create issue')) + '</button>'
+            + '<span class="jt-status"></span>'
+            + '</div>'
+            + '</form>'
             + '<div class="jt-related" style="display:none"></div>';
 
         $macro.html(html);
 
+        var $form = $macro.find('.jt-form');
+        var $alert = $macro.find('.jt-alert');
+        var $status = $macro.find('.jt-status');
+        var $submit = $macro.find('.jt-submit');
         var $project = $macro.find('.jt-project');
-        var $type = $macro.find('.jt-type');
+        var $issueType = $macro.find('.jt-issue-type');
         var $summary = $macro.find('.jt-summary');
         var $description = $macro.find('.jt-description');
         var $due = $macro.find('.jt-due');
         var $priority = $macro.find('.jt-priority');
-        var $assigneeView = $macro.find('.jt-assignee-view');
-        var $create = $macro.find('.jt-create');
-        var $status = $macro.find('.jt-status');
-        var $alert = $macro.find('.jt-alert');
+        var $assignee = $macro.find('.jt-assignee');
+        var $users = $macro.find('.jt-users');
+        var $picked = $macro.find('.jt-picked');
+        var $pickedName = $macro.find('.jt-picked-name');
 
-        if (defaults.summaryPrefix) {
-            $summary.val(defaults.summaryPrefix + pageTitle);
+        var selectedUser = null;
+        var typeRequest = null;
+        var typeSequence = 0;
+
+        function showError(message) {
+            $alert.text(message).show();
         }
 
-        function renderAssignee() {
-            if (assignee) {
-                $assigneeView.html('<span class="jt-picked">' + esc(assignee.displayName)
-                    + ' <a href="#" class="jt-remove-assignee">移除</a></span>');
-            } else {
-                $assigneeView.html('<div class="jt-row">'
-                    + '<input type="text" class="jt-user-query" placeholder="姓名或邮箱，回车搜索" />'
-                    + '<button type="button" class="aui-button jt-user-search">搜索</button>'
-                    + '</div><div class="jt-users"></div>');
+        function clearError() {
+            $alert.text('').hide();
+        }
+
+        // 草稿/预览状态没有页面 ID，任务无法关联到页面，直接提示先保存
+        if (!pageId) {
+            showError(t('error-unsaved', 'Save the page before creating a Jira issue'));
+            $submit.prop('disabled', true);
+        }
+
+        function loadProjects() {
+            sharedRequest('projects', $macro, '/projects').done(function (projects) {
+                var options = option('', t('select', 'Select…'));
+                $.each(projects || [], function (index, project) {
+                    options += option(project.key, project.name || project.key);
+                });
+                $project.html(options);
+                if (defaultProject) {
+                    $project.val(defaultProject);
+                }
+                loadIssueTypes($project.val());
+            }).fail(function (xhr) {
+                showError(errorText(xhr, t('error-projects', 'Unable to reach Jira.')));
+            });
+        }
+
+        function loadIssueTypes(projectKey) {
+            var sequence = ++typeSequence;
+            if (typeRequest) {
+                typeRequest.abort();
+                typeRequest = null;
             }
+            if (!projectKey) {
+                $issueType.html(option('', t('select-first', 'Select a project first')));
+                return;
+            }
+
+            $issueType.html(option('', t('loading', 'Loading…')));
+            typeRequest = api($macro, '/issuetypes', { data: { projectKey: projectKey } });
+            typeRequest.done(function (types) {
+                if (sequence !== typeSequence) {
+                    return;
+                }
+                var options = option('', t('select', 'Select…'));
+                $.each(types || [], function (index, type) {
+                    options += option(type.name, type.name);
+                });
+                $issueType.html(options);
+                if (defaultIssueType) {
+                    $issueType.val(defaultIssueType);
+                }
+            }).fail(function (xhr) {
+                if (sequence !== typeSequence) {
+                    return;
+                }
+                $issueType.html(option('', errorText(xhr, t('error-issue-types', 'Failed to load issue types'))));
+            });
         }
 
-        renderAssignee();
+        function loadPriorities() {
+            sharedRequest('priorities', $macro, '/priorities').done(function (priorities) {
+                var options = option('', t('priority-default', 'Default'));
+                $.each(priorities || [], function (index, priority) {
+                    options += option(priority.id, priority.name);
+                });
+                $priority.html(options);
+            }).fail(function () {
+                $priority.html(option('', t('priority-default', 'Default')));
+            });
+        }
 
-        $assigneeView.on('click', '.jt-remove-assignee', function (e) {
-            e.preventDefault();
-            assignee = null;
-            renderAssignee();
-        });
+        function pickUser(name, accountId, displayName) {
+            selectedUser = { name: name || '', accountId: accountId || '', displayName: displayName || '' };
+            $assignee.val(selectedUser.displayName);
+            $pickedName.text(selectedUser.displayName);
+            $picked.show();
+            $users.hide().empty();
+        }
+
+        function clearUser() {
+            selectedUser = null;
+            $assignee.val('');
+            $picked.hide();
+            $users.hide().empty();
+        }
 
         function searchUsers() {
-            var query = $assigneeView.find('.jt-user-query').val();
+            var query = ($assignee.val() || '').trim();
+            var projectKey = $project.val() || '';
             if (!query) {
                 return;
             }
-            api('/users', { data: { projectKey: $project.val(), query: query } })
+            if (!projectKey) {
+                $users.html('<span class="jt-muted">'
+                    + esc(t('select-first', 'Select a project first')) + '</span>').show();
+                return;
+            }
+
+            $users.html('<span class="jt-muted">' + esc(t('loading', 'Loading…')) + '</span>').show();
+            api($macro, '/users', { data: { projectKey: projectKey, query: query } })
                 .done(function (users) {
-                    var $list = $assigneeView.find('.jt-users').empty();
-                    $.each(users, function (i, user) {
-                        $('<button type="button" class="aui-button aui-button-link jt-user-item"></button>')
-                            .text(user.displayName + (user.email ? '（' + user.email + '）' : ''))
-                            .data('user', user)
-                            .appendTo($list);
+                    if (!users || !users.length) {
+                        $users.html('<span class="jt-muted">' + esc(t('load-failed', 'Load failed')) + '</span>');
+                        return;
+                    }
+                    var items = '';
+                    $.each(users, function (index, user) {
+                        var displayName = user.displayName || user.name || '';
+                        items += '<button type="button" class="jt-user-item" data-name="'
+                            + esc(user.name || '') + '" data-account-id="'
+                            + esc(user.accountId || '') + '" data-display-name="'
+                            + esc(displayName) + '">' + esc(displayName) + '</button>';
                     });
+                    $users.html(items);
                 })
                 .fail(function (xhr) {
-                    $alert.text(errorText(xhr, '用户搜索失败')).show();
+                    $users.html('<span class="jt-muted">'
+                        + esc(errorText(xhr, t('error-users', 'User search failed'))) + '</span>');
                 });
         }
 
-        $assigneeView.on('click', '.jt-user-search', searchUsers);
-        $assigneeView.on('keydown', '.jt-user-query', function (e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
+        loadProjects();
+        loadPriorities();
+        loadRelated($macro, t);
+
+        $project.on('change', function () {
+            loadIssueTypes($project.val());
+        });
+
+        $macro.find('.jt-search').on('click', searchUsers);
+
+        $assignee.on('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
                 searchUsers();
             }
         });
-        $assigneeView.on('click', '.jt-user-item', function () {
-            assignee = $(this).data('user');
-            renderAssignee();
+
+        $assignee.on('input', function () {
+            if (selectedUser && $assignee.val() !== selectedUser.displayName) {
+                selectedUser = null;
+                $picked.hide();
+            }
         });
 
-        function loadTypes(projectKey) {
-            $type.empty().append('<option value="">加载中…</option>');
-            if (!projectKey) {
-                $type.empty().append('<option value="">请先选择项目</option>');
+        $users.on('click', '.jt-user-item', function () {
+            pickUser($(this).attr('data-name'), $(this).attr('data-account-id'),
+                $(this).attr('data-display-name'));
+        });
+
+        $macro.find('.jt-remove-user').on('click', clearUser);
+
+        $form.on('submit', function (event) {
+            event.preventDefault();
+            clearError();
+            $status.empty();
+
+            var projectKey = $project.val() || '';
+            var issueTypeName = $issueType.val() || '';
+            var summary = ($summary.val() || '').trim();
+            if (!projectKey || !issueTypeName || !summary) {
+                showError(t('error-required', 'Project, issue type and summary are required'));
                 return;
             }
-            api('/issuetypes', { data: { projectKey: projectKey } })
-                .done(function (types) {
-                    $type.empty().append('<option value="">请选择</option>');
-                    $.each(types, function (i, type) {
-                        $('<option/>').val(type.name).text(type.name).appendTo($type);
+            if (!pageId) {
+                showError(t('error-unsaved', 'Save the page before creating a Jira issue'));
+                return;
+            }
+
+            var payload = {
+                pageId: pageId,
+                projectKey: projectKey,
+                issueTypeName: issueTypeName,
+                summary: summary,
+                description: ($description.val() || '').trim(),
+                dueDate: $due.val() || '',
+                priorityId: $priority.val() || '',
+                labels: labels,
+                assigneeName: selectedUser ? selectedUser.name : '',
+                assigneeAccountId: selectedUser ? selectedUser.accountId : ''
+            };
+
+            $submit.prop('disabled', true).text(t('creating', 'Creating…'));
+            api($macro, '/issues', { type: 'POST', data: JSON.stringify(payload) })
+                .done(function (issue) {
+                    var link = '<a href="' + esc(issue.url || '#') + '" target="_blank" '
+                        + 'rel="noopener noreferrer">' + esc(issue.key || '') + '</a>';
+                    $status.html(esc(t('created', 'Created {0}')).replace('{0}', link));
+                    $summary.val(summaryPrefix ? summaryPrefix + pageTitle : '');
+                    loadRelated($macro, t, {
+                        key: issue.key || '',
+                        url: issue.url || '',
+                        summary: issue.summary || summary
                     });
-                    var preferred = defaults.issueTypeName;
-                    var matched = false;
-                    if (preferred) {
-                        $.each(types, function (i, type) {
-                            if (type.name === preferred) {
-                                matched = true;
-                            }
-                        });
-                    }
-                    $type.val(matched ? preferred : (types.length ? types[0].name : ''));
                 })
                 .fail(function (xhr) {
-                    $type.empty().append('<option value="">加载失败</option>');
-                    $alert.text(errorText(xhr, '任务类型加载失败')).show();
-                });
-        }
-
-        $project.on('change', function () {
-            loadTypes($project.val());
-        });
-
-        api('/projects').done(function (projects) {
-            $project.empty().append('<option value="">请选择</option>');
-            var matched = false;
-            $.each(projects, function (i, project) {
-                $('<option/>').val(project.key).text(project.name + '（' + project.key + '）').appendTo($project);
-                if (project.key === defaults.projectKey) {
-                    matched = true;
-                }
-            });
-            if (matched) {
-                $project.val(defaults.projectKey);
-            }
-            loadTypes($project.val());
-        }).fail(function (xhr) {
-            $project.empty().append('<option value="">加载失败</option>');
-            $alert.text(errorText(xhr, '无法连接 Jira，请检查应用链接配置')).show();
-        });
-
-        api('/priorities').done(function (priorities) {
-            $.each(priorities, function (i, priority) {
-                $('<option/>').val(priority.id).text(priority.name).appendTo($priority);
-            });
-        });
-
-        $create.on('click', function () {
-            var summary = $.trim($summary.val());
-            if (!$project.val() || !$type.val() || !summary) {
-                $alert.text('请填写项目、任务类型和标题').show();
-                return;
-            }
-            $alert.hide();
-            $create.prop('disabled', true);
-            $status.text('创建中…');
-
-            api('/issues', {
-                type: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({
-                    projectKey: $project.val(),
-                    issueTypeName: $type.val(),
-                    summary: summary,
-                    description: $description.val(),
-                    dueDate: $due.val(),
-                    priorityId: $priority.val(),
-                    assigneeName: assignee ? assignee.name : '',
-                    labels: defaults.labels ? $.map(defaults.labels.split(','), $.trim) : [],
-                    pageId: pageId
+                    showError(errorText(xhr, t('error-create', 'Create failed')));
                 })
-            }).done(function (issue) {
-                $status.empty().append('已创建 <a href="' + esc(issue.url)
-                    + '" target="_blank" rel="noreferrer">' + esc(issue.key) + '</a>');
-                $summary.val(defaults.summaryPrefix || '');
-                $description.val('');
-                $due.val('');
-                loadRelated($macro, pageId);
-            }).fail(function (xhr) {
-                $alert.text(errorText(xhr, '创建失败')).show();
-                $status.empty();
-            }).always(function () {
-                $create.prop('disabled', false);
-            });
+                .always(function () {
+                    $submit.prop('disabled', false).text(t('create', 'Create issue'));
+                });
         });
-
-        loadRelated($macro, pageId);
     }
 
     AJS.toInit(function () {
@@ -248,4 +429,4 @@
             init($(this));
         });
     });
-})(AJS.$);
+}());

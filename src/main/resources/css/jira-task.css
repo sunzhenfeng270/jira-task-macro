@@ -83,6 +83,7 @@
 
 .jira-task-macro .jt-row input {
     flex: 1;
+    min-width: 0;
 }
 
 .jira-task-macro .jt-actions {
